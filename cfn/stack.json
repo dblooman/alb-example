@@ -1,0 +1,383 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "ImageId": {
+      "Type": "String",
+      "Default": "ami-bff32ccc"
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Description": "The size of the instances",
+      "Default": "t2.micro"
+    },
+    "KeyName": {
+      "Type": "AWS::EC2::KeyPair::KeyName"
+    },
+    "MaxSize": {
+      "Type": "String",
+      "Description": "The maximum number of instances",
+      "Default": 2
+    },
+    "MinSize": {
+      "Type": "String",
+      "Description": "The minimum number of instances",
+      "Default": 1
+    },
+    "PublicSubnets": {
+      "Description": "The id of public subnet 1",
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Default": "vpc-"
+    }
+  },
+  "Resources": {
+    "ComponentAutoScalingGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "UpdatePolicy": {
+        "AutoScalingRollingUpdate": {
+          "MinInstancesInService": 1
+        }
+      },
+      "Properties": {
+        "Tags": [
+          {
+            "Value": "ALB Node",
+            "PropagateAtLaunch": true,
+            "Key": "Name"
+          }
+        ],
+        "TargetGroupARNs": [
+          {
+            "Ref": "ELBTargetGroup"
+          },
+          {
+            "Ref": "ELBTargetGroup2"
+          }
+        ],
+        "MinSize": {
+          "Ref": "MinSize"
+        },
+        "MaxSize": {
+          "Ref": "MaxSize"
+        },
+        "LaunchConfigurationName": {
+          "Ref": "ComponentLaunchConfiguration"
+        },
+        "AvailabilityZones": {
+          "Fn::GetAZs": ""
+        },
+        "HealthCheckType": "ELB",
+        "HealthCheckGracePeriod": 600
+      }
+    },
+    "ComponentLaunchConfiguration": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Properties": {
+        "KeyName": {
+          "Ref": "KeyName"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "ComponentSecurityGroup"
+          }
+        ],
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "ComponentInstanceProfile"
+        },
+        "ImageId": {
+          "Ref": "ImageId"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#cloud-config",
+                "\n",
+                "runcmd:\n",
+                "- yum update -y\n",
+                "- yum install epel-release -y\n",
+                "- yum install docker -y \n",
+                "- service docker start\n",
+                "- docker pull davey/ruby-app\n",
+                "- docker pull davey/go-app\n",
+                "- docker run -d -p 9292:9292 davey/ruby-app\n",
+                "- docker run -d -p 8080:8080 davey/go-app\n"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "LoadBalancerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "SecurityGroupIngress": [
+          {
+            "ToPort": 80,
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "GroupDescription": "An ELB group allowing access only to from the corresponding component"
+      }
+    },
+    "ComponentSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "SecurityGroupIngress": [
+          {
+            "FromPort": 8080,
+            "ToPort": 8080,
+            "IpProtocol": "tcp",
+            "SourceSecurityGroupId": {
+              "Ref": "LoadBalancerSecurityGroup"
+            }
+          },
+          {
+            "FromPort": 9292,
+            "ToPort": 9292,
+            "IpProtocol": "tcp",
+            "SourceSecurityGroupId": {
+              "Ref": "LoadBalancerSecurityGroup"
+            }
+          },
+          {
+            "ToPort": 22,
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "GroupDescription": "A component security group allowing access only from the corresponding ELB"
+      }
+    },
+    "ELBRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "ELBTargetGroup"
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "Values": [
+              "/golang"
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ELBListen"
+        },
+        "Priority": 1
+      }
+    },
+    "ELBRule3": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "ELBTargetGroup"
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "Values": [
+              "/status"
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ELBListen"
+        },
+        "Priority": 2
+      }
+    },
+    "ELBRule2": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "ELBTargetGroup2"
+            },
+            "Type": "forward"
+          }
+        ],
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "Values": [
+              "/ruby"
+            ]
+          }
+        ],
+        "ListenerArn": {
+          "Ref": "ELBListen"
+        },
+        "Priority": 3
+      }
+    },
+    "ELBListen": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "ELBTargetGroup"
+            },
+            "Type": "forward"
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ComponentApplicationLoadBalancer"
+        },
+        "Port": 80,
+        "Protocol": "HTTP"
+      }
+    },
+    "ELBTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": "15",
+        "HealthCheckPath": "/status",
+        "HealthCheckPort": "8080",
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 3,
+        "Port": 8080,
+        "Protocol": "HTTP",
+        "UnhealthyThresholdCount": 5,
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "ELBTargetGroup2": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": "15",
+        "HealthCheckPath": "/status",
+        "HealthCheckPort": "9292",
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 3,
+        "Port": 9292,
+        "Protocol": "HTTP",
+        "UnhealthyThresholdCount": 5,
+        "VpcId": {
+          "Ref": "VpcId"
+        }
+      }
+    },
+    "ComponentApplicationLoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Name": "ALB",
+        "Subnets": {
+          "Ref": "PublicSubnets"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "LoadBalancerSecurityGroup"
+          }
+        ]
+      }
+    },
+    "ComponentInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "DefaultRole"
+          }
+        ]
+      }
+    },
+    "EC2ComponentPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudwatch:*"
+              ],
+              "Resource": [
+                "*"
+              ],
+              "Effect": "Allow"
+            },
+            {
+              "Action": [
+                "cloudformation:Describe*"
+              ],
+              "Resource": [
+                "*"
+              ],
+              "Effect": "Allow"
+            },
+            {
+              "Action": [
+                "ec2:Describe*"
+              ],
+              "Resource": [
+                "*"
+              ],
+              "Effect": "Allow"
+            }
+          ]
+        },
+        "PolicyName": "EC2ComponentPolicy",
+        "Roles": [
+          {
+            "Ref": "DefaultRole"
+          }
+        ]
+      }
+    },
+    "DefaultRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Path": "/",
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

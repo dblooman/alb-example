@@ -3,6 +3,7 @@
   "Parameters": {
     "ImageId": {
       "Type": "String",
+      "Description": "ID of Amazon Linux AMI",
       "Default": "ami-bff32ccc"
     },
     "InstanceType": {
